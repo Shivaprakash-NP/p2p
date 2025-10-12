@@ -1,56 +1,62 @@
 package com.shiva.p2pchat.core;
 
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-import java.net.Socket;
-import java.security.PrivateKey;
-
 import com.shiva.p2pchat.crypto.CryptoUtils;
 import com.shiva.p2pchat.model.Message;
+import com.shiva.p2pchat.ui.AnsiColors;
+
+import java.io.ObjectInputStream;
+import java.net.Socket;
+import java.security.PrivateKey;
 
 public class ConnectionHandler implements Runnable {
 
     private final Socket socket;
+    private final PeerNode peerNode;
     private final PrivateKey privateKey;
-    private final String localUsername;
-    private String remoteUsername;
 
-    public ConnectionHandler(Socket socket, String localUsername, PrivateKey privateKey) {
+    public ConnectionHandler(Socket socket, PeerNode peerNode) {
         this.socket = socket;
-        this.localUsername = localUsername;
-        this.privateKey = privateKey;
+        this.peerNode = peerNode;
+        this.privateKey = peerNode.getKeyManager().getPrivateKey();
     }
 
     @Override
     public void run() {
-        try (
-            ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
-            ObjectInputStream in = new ObjectInputStream(socket.getInputStream())
-        ) {
-            // Listen for incoming messages in a separate thread
-            Thread listenerThread = new Thread(() -> {
-                try {
-                    while (!socket.isClosed()) {
-                        Message receivedMsg = (Message) in.readObject();
-                        this.remoteUsername = receivedMsg.getSenderUsername();
-                        String decryptedContent = CryptoUtils.decrypt(receivedMsg.getEncryptedContent(), privateKey);
-                        System.out.println("\n[" + remoteUsername + "]: " + decryptedContent);
-                        System.out.print("> "); // Prompt for next message
-                    }
-                } catch (Exception e) {
-                     System.out.println("\nConnection with " + (remoteUsername != null ? remoteUsername : "peer") + " closed.");
-                }
-            });
-            listenerThread.start();
-            
-            listenerThread.join(); // Wait for listener to finish
-
+        try (ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
+            while (!socket.isClosed()) {
+                Message message = (Message) in.readObject();
+                handleMessage(message);
+            }
         } catch (Exception e) {
-            // Error is handled in the listener thread
-        } finally {
-            try {
-                socket.close();
-            } catch (Exception e) { /* ignore */ }
+            // Connection closed or error
+        }
+    }
+
+    private void handleMessage(Message message) {
+        try {
+            String content = CryptoUtils.decrypt(message.getEncryptedContent(), privateKey);
+            String sender = message.getSenderUsername();
+
+            switch (message.getType()) {
+                case REQUEST:
+                    peerNode.addMessageRequest(sender, content);
+                    System.out.println(AnsiColors.ANSI_YELLOW + "\n[SYSTEM] You have a new message request from '" + sender + "'. Type 'inbox' to view." + AnsiColors.ANSI_RESET);
+                    System.out.print(AnsiColors.ANSI_CYAN + "\n> " + AnsiColors.ANSI_RESET);
+                    break;
+                case ACCEPT_REQUEST:
+                    peerNode.startChatSession(sender);
+                    System.out.println(AnsiColors.ANSI_YELLOW + "\n[SYSTEM] '" + sender + "' accepted your chat request. You are now in a chat." + AnsiColors.ANSI_RESET);
+                    System.out.println("--- Chat with " + sender + " ---");
+                    break;
+                case CHAT:
+                    if (peerNode.isInChatWith(sender)) {
+                        System.out.println(AnsiColors.ANSI_GREEN + "\n[" + sender + "]: " + content + AnsiColors.ANSI_RESET);
+                        System.out.print(AnsiColors.ANSI_CYAN + "> " + AnsiColors.ANSI_RESET);
+                    }
+                    break;
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to handle message: " + e.getMessage());
         }
     }
 }
