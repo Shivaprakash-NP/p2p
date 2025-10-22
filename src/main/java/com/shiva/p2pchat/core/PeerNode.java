@@ -15,10 +15,21 @@ import com.shiva.p2pchat.crypto.CryptoUtils;
 import com.shiva.p2pchat.crypto.KeyManager;
 import com.shiva.p2pchat.discovery.PeerDiscovery;
 import com.shiva.p2pchat.model.Message;
-import com.shiva.p2pchat.ui.AnsiColors;
+import com.shiva.p2pchat.ui.UI;
 
 public class PeerNode {
 
+    // --- State Management ---
+    private enum AppState {
+        MAIN_MENU,
+        IN_CHAT,
+        INBOX_VIEW
+    }
+    private volatile AppState currentState = AppState.MAIN_MENU;
+    private volatile String currentChatPartner = null;
+    private final Object printLock = new Object(); // To synchronize console output
+
+    // --- Core Components ---
     private final String username;
     private final int tcpPort;
     private final KeyManager keyManager;
@@ -26,9 +37,8 @@ public class PeerNode {
     private final ExecutorService executorService = Executors.newCachedThreadPool();
     private volatile boolean running = true;
 
+    // --- Data Stores ---
     private final Map<String, List<String>> messageRequests = new ConcurrentHashMap<>();
-    private final Map<String, String> activeChats = new ConcurrentHashMap<>(); // Maps user to their accepted chat partner
-    private String currentChatPartner = null;
 
     public PeerNode(String username, int tcpPort, int discoveryPort, KeyManager keyManager) {
         this.username = username;
@@ -37,13 +47,19 @@ public class PeerNode {
         this.peerDiscovery = new PeerDiscovery(username, tcpPort, discoveryPort, CryptoUtils.keyToString(keyManager.getPublicKey()));
     }
 
+    public KeyManager getKeyManager() { return keyManager; }
+
+    /**
+     * Starts the main application loops:
+     * 1. Peer Discovery (UDP)
+     * 2. Server Listener (TCP)
+     * 3. User Input (Console)
+     */
     public void start() {
         executorService.submit(peerDiscovery);
         startServerListener();
-        handleUserInput();
+        handleUserInput(); // This will block and run the main UI loop
     }
-    
-    public KeyManager getKeyManager() { return keyManager; }
 
     private void startServerListener() {
         executorService.submit(() -> {
@@ -53,131 +69,192 @@ public class PeerNode {
                     executorService.submit(new ConnectionHandler(clientSocket, this));
                 }
             } catch (Exception e) {
-                if (running) System.err.println("Server listener failed: " + e.getMessage());
+                if (running) UI.printError("Server listener failed: " + e.getMessage());
             }
         });
     }
 
+    // --- MAIN UI STATE MACHINE ---
+
     private void handleUserInput() {
         Scanner scanner = new Scanner(System.in);
         while (running) {
-            if (currentChatPartner != null) {
-                handleChatInput(scanner);
-            } else {
-                handleCommandInput(scanner);
+            // The state determines which prompt and logic to use
+            switch (currentState) {
+                case MAIN_MENU:
+                    handleMainMenuInput(scanner);
+                    break;
+                case INBOX_VIEW:
+                    handleInboxInput(scanner);
+                    break;
+                case IN_CHAT:
+                    handleChatInput(scanner);
+                    break;
             }
         }
     }
 
-    private void handleCommandInput(Scanner scanner) {
-        System.out.print(AnsiColors.ANSI_CYAN + "\n(online | inbox | chat <user> <msg> | exit) > " + AnsiColors.ANSI_RESET);
+    /**
+     * Logic for the MAIN_MENU state.
+     * Handles 'online', 'requests', 'chat', and 'exit'.
+     */
+    private void handleMainMenuInput(Scanner scanner) {
+        System.out.print(UI.MAIN_PROMPT);
         String line = scanner.nextLine();
-        String[] parts = line.split("\\s+", 3);
+        String[] parts = line.split("\\s+", 3); // "chat user msg"
         String command = parts[0].toLowerCase();
 
-        switch (command) {
-            case "online": listPeers(); break;
-            case "inbox": viewInbox(scanner); break;
-            case "chat":
-                if (parts.length == 3) sendMessageRequest(parts[1], parts[2]);
-                else System.out.println("Usage: chat <username> <message>");
-                break;
-            case "exit": stop(); break;
-            default: System.out.println("Unknown command.");
+        synchronized (printLock) {
+            switch (command) {
+                case "online":
+                    listPeers();
+                    break;
+                case "requests":
+                    listRequests();
+                    currentState = AppState.INBOX_VIEW; // Change state
+                    break;
+                case "chat":
+                    if (parts.length == 3) {
+                        sendMessageRequest(parts[1], parts[2]);
+                    } else {
+                        UI.printError("Usage: chat <username> <message>");
+                    }
+                    break;
+                case "exit":
+                    stop();
+                    break;
+                default:
+                    UI.printError("Unknown command.");
+            }
         }
     }
 
-    private void handleChatInput(Scanner scanner) {
-        System.out.print(AnsiColors.ANSI_CYAN + "> " + AnsiColors.ANSI_RESET);
-        String messageText = scanner.nextLine();
-        if ("/back".equalsIgnoreCase(messageText)) {
-            System.out.println(AnsiColors.ANSI_YELLOW + "[SYSTEM] Exited chat with " + currentChatPartner + AnsiColors.ANSI_RESET);
-            currentChatPartner = null;
-            return;
+    /**
+     * Logic for the INBOX_VIEW state.
+     * Handles 'accept', 'read', and 'back'.
+     */
+    private void handleInboxInput(Scanner scanner) {
+        System.out.print(UI.INBOX_PROMPT);
+        String line = scanner.nextLine();
+        String[] parts = line.split("\\s+", 2);
+        String command = parts[0].toLowerCase();
+
+        synchronized (printLock) {
+            if ("back".equals(command)) {
+                currentState = AppState.MAIN_MENU;
+                return;
+            }
+            
+            if (parts.length == 2) {
+                String user = parts[1];
+                if ("accept".equals(command)) {
+                    acceptChatRequest(user);
+                } else if ("read".equals(command)) {
+                    readMessagesFrom(user);
+                } else {
+                    UI.printError("Unknown command.");
+                }
+            } else {
+                UI.printError("Usage: <command> <username> or 'back'");
+            }
         }
-        sendMessage(currentChatPartner, messageText, Message.MessageType.CHAT);
     }
+
+    /**
+     * Logic for the IN_CHAT state.
+     * Handles sending messages and the 'quit' command.
+     */
+    private void handleChatInput(Scanner scanner) {
+        System.out.print(UI.CHAT_PROMPT);
+        String messageText = scanner.nextLine();
+
+        synchronized (printLock) {
+            if ("quit".equalsIgnoreCase(messageText)) {
+                UI.printSystem("You have left the chat.");
+                currentChatPartner = null;
+                currentState = AppState.MAIN_MENU;
+                return;
+            }
+            sendChatMessage(currentChatPartner, messageText);
+        }
+    }
+
+    // --- COMMAND ACTIONS ---
 
     private void listPeers() {
-        System.out.println(AnsiColors.ANSI_YELLOW + "\n--- Online Users ---" + AnsiColors.ANSI_RESET);
+        UI.printHeader("Online Users");
         Map<String, ?> peers = peerDiscovery.getOnlinePeers();
         if (peers.isEmpty()) {
             System.out.println("No other users found.");
         } else {
-            peers.keySet().forEach(System.out::println);
+            peers.keySet().forEach(user -> System.out.println(UI.GREEN + "- " + user + UI.RESET));
         }
-        System.out.println(AnsiColors.ANSI_YELLOW + "--------------------" + AnsiColors.ANSI_RESET);
-    }
-    
-    public void addMessageRequest(String fromUser, String message) {
-        messageRequests.computeIfAbsent(fromUser, k -> new ArrayList<>()).add(message);
     }
 
-    private void viewInbox(Scanner scanner) {
-        System.out.println(AnsiColors.ANSI_YELLOW + "\n--- Message Requests (" + messageRequests.size() + ") ---" + AnsiColors.ANSI_RESET);
-        messageRequests.keySet().forEach(user -> System.out.println("- " + user));
-        System.out.println(AnsiColors.ANSI_YELLOW + "------------------------------" + AnsiColors.ANSI_RESET);
-
-        if (!messageRequests.isEmpty()) {
-            System.out.print(AnsiColors.ANSI_CYAN + "(accept <user> | read <user> | back) > " + AnsiColors.ANSI_RESET);
-            String line = scanner.nextLine();
-            String[] parts = line.split("\\s+", 2);
-            if (parts.length == 2) {
-                if ("accept".equalsIgnoreCase(parts[0])) {
-                    acceptChatRequest(parts[1]);
-                } else if ("read".equalsIgnoreCase(parts[0])) {
-                    readMessagesFrom(parts[1]);
-                }
-            }
+    private void listRequests() {
+        UI.printHeader("Message Requests (" + messageRequests.size() + ")");
+        if (messageRequests.isEmpty()) {
+            System.out.println("Your inbox is empty.");
+        } else {
+            messageRequests.keySet().forEach(user -> 
+                System.out.println(UI.YELLOW + "- " + user + " (" + messageRequests.get(user).size() + " new)" + UI.RESET)
+            );
         }
     }
 
     private void readMessagesFrom(String user) {
         List<String> messages = messageRequests.get(user);
         if (messages != null) {
-            System.out.println(AnsiColors.ANSI_YELLOW + "\n--- Messages from " + user + " ---" + AnsiColors.ANSI_RESET);
-            messages.forEach(System.out::println);
+            UI.printHeader("Messages from " + user);
+            for (String msg : messages) {
+                System.out.println(UI.WHITE + "- \"" + msg + "\"" + UI.RESET);
+            }
         } else {
-            System.out.println("No messages from that user.");
+            UI.printError("No messages from that user.");
         }
     }
 
-    private void acceptChatRequest(String targetUsername) {
-        if (!messageRequests.containsKey(targetUsername)) {
-            System.out.println("No request from that user.");
+    private void acceptChatRequest(String user) {
+        if (!messageRequests.containsKey(user)) {
+            UI.printError("No request from that user.");
             return;
         }
-        List<String> messages = messageRequests.remove(targetUsername);
-        activeChats.put(username, targetUsername);
-        currentChatPartner = targetUsername;
         
-        sendMessage(targetUsername, "ACCEPT", Message.MessageType.ACCEPT_REQUEST);
+        List<String> messages = messageRequests.remove(user);
+        currentChatPartner = user;
+        currentState = AppState.IN_CHAT; // Change state to IN_CHAT
+
+        // Send an ACCEPT_REQUEST message so they also enter the chat state
+        sendMessage(user, "I've accepted your chat request. Let's talk!", Message.MessageType.ACCEPT_REQUEST);
         
-        System.out.println("--- Chat with " + targetUsername + " ---");
-        messages.forEach(msg -> System.out.println(AnsiColors.ANSI_GREEN + "[" + targetUsername + "]: " + msg + AnsiColors.ANSI_RESET));
-    }
-    
-    public void startChatSession(String partner) {
-        currentChatPartner = partner;
-    }
-    
-    public boolean isInChatWith(String partner) {
-        return partner.equals(currentChatPartner);
+        UI.printHeader("Chat with " + user);
+        UI.printSystem("Type 'quit' to exit the chat.\n");
+        // Print the message history that started this chat
+        for (String msg : messages) {
+            UI.printChat(user, msg);
+        }
     }
 
     private void sendMessageRequest(String targetUsername, String message) {
         if (username.equals(targetUsername)) {
-            System.out.println("You can't chat with yourself.");
+            UI.printError("You can't chat with yourself.");
             return;
         }
         sendMessage(targetUsername, message, Message.MessageType.REQUEST);
-        System.out.println(AnsiColors.ANSI_YELLOW + "[SYSTEM] Message request sent to '" + targetUsername + "'." + AnsiColors.ANSI_RESET);
+        UI.printSystem("Message request sent to '" + targetUsername + "'.");
     }
 
+    private void sendChatMessage(String targetUsername, String message) {
+        sendMessage(targetUsername, message, Message.MessageType.CHAT);
+    }
+
+    /**
+     * The core sending logic. Connects to the peer and sends a Message object.
+     */
     private void sendMessage(String targetUsername, String message, Message.MessageType type) {
         PeerDiscovery.DiscoveredPeer peer = peerDiscovery.getPeer(targetUsername);
         if (peer == null) {
-            System.out.println("User '" + targetUsername + "' is not online.");
+            UI.printError("User '" + targetUsername + "' is not online or discoverable.");
             return;
         }
 
@@ -190,15 +267,60 @@ public class PeerNode {
             out.flush();
 
         } catch (Exception e) {
-            System.err.println("Error sending message to " + targetUsername + ": " + e.getMessage());
+            UI.printError("Error sending message to " + targetUsername + ": " + e.getMessage());
         }
     }
-
-    public void stop() {
-        System.out.println("Shutting down...");
+    
+    private void stop() {
+        UI.printSystem("Shutting down...");
         this.running = false;
         peerDiscovery.stop();
         executorService.shutdownNow();
         System.exit(0);
+    }
+
+    // --- ASYNCHRONOUS (NETWORK-THREAD) METHODS ---
+
+    /**
+     * Called by ConnectionHandler when a new request arrives.
+     * Synchronized to prevent conflicts with the UI thread.
+     */
+    public void addMessageRequest(String fromUser, String message) {
+        synchronized (printLock) {
+            messageRequests.computeIfAbsent(fromUser, k -> new ArrayList<>()).add(message);
+            // Only print notification if user is in main menu
+            if (currentState == AppState.MAIN_MENU) {
+                UI.printNotification("New request from '" + fromUser + "'. Type 'requests' to view.");
+            }
+        }
+    }
+
+    /**
+     * Called by ConnectionHandler when a chat partner accepts our request.
+     * Forces the user into the chat state.
+     */
+    public void startChatSession(String partner, String initialMessage) {
+        synchronized (printLock) {
+            currentChatPartner = partner;
+            currentState = AppState.IN_CHAT;
+            UI.printHeader("Chat with " + partner);
+            UI.printSystem("Type 'quit' to exit the chat.\n");
+            UI.printChat(partner, initialMessage);
+            System.out.print(UI.CHAT_PROMPT); // Print first chat prompt
+        }
+    }
+
+    /**
+     * Called by ConnectionHandler when a chat message arrives.
+     */
+    public void displayChatMessage(String fromUser, String message) {
+        synchronized (printLock) {
+            UI.printChat(fromUser, message);
+            System.out.print(UI.CHAT_PROMPT); // Re-print prompt
+        }
+    }
+
+    public boolean isInChatWith(String partner) {
+        return partner != null && partner.equals(currentChatPartner);
     }
 }

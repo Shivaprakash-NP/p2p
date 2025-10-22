@@ -4,7 +4,7 @@ import java.util.Scanner;
 
 import com.shiva.p2pchat.core.PeerNode;
 import com.shiva.p2pchat.crypto.KeyManager;
-import com.shiva.p2pchat.ui.AnsiColors;
+import com.shiva.p2pchat.ui.UI;
 
 public class Main {
 
@@ -12,26 +12,28 @@ public class Main {
     private static final int DISCOVERY_PORT = 8889;
 
     public static void main(String[] args) {
-        System.out.println(AnsiColors.ANSI_BOLD + AnsiColors.ANSI_YELLOW);
-        System.out.println("============================");
-        System.out.println("=== P2P SECURE MESSENGER ===");
-        System.out.println("============================" + AnsiColors.ANSI_RESET);
+        UI.printHeader("P2P SECURE MESSENGER");
 
         Scanner scanner = new Scanner(System.in);
-        System.out.print(AnsiColors.ANSI_CYAN + "Enter your username: " + AnsiColors.ANSI_RESET);
+        System.out.print(UI.CYAN + "Enter your username: " + UI.RESET);
         String username = scanner.nextLine();
+
+        if (username.isEmpty() || username.contains(" ")) {
+            UI.printError("Username cannot be empty or contain spaces.");
+            return;
+        }
 
         try {
             KeyManager keyManager = new KeyManager();
             keyManager.loadOrCreateKeys();
             
-            System.out.println("\nWelcome, " + username + "! Searching for peers...");
+            System.out.println(UI.GREEN + "\nWelcome, " + UI.BOLD + username + UI.RESET + UI.GREEN + "! Searching for peers..." + UI.RESET);
 
             PeerNode node = new PeerNode(username, TCP_PORT, DISCOVERY_PORT, keyManager);
             node.start();
 
         } catch (Exception e) {
-            System.err.println("A critical error occurred: " + e.getMessage());
+            UI.printError("A critical error occurred: " + e.getMessage());
             e.printStackTrace();
         }
     }

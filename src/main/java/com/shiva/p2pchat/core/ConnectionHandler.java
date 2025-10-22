@@ -2,7 +2,7 @@ package com.shiva.p2pchat.core;
 
 import com.shiva.p2pchat.crypto.CryptoUtils;
 import com.shiva.p2pchat.model.Message;
-import com.shiva.p2pchat.ui.AnsiColors;
+import com.shiva.p2pchat.ui.UI;
 
 import java.io.ObjectInputStream;
 import java.net.Socket;
@@ -40,23 +40,22 @@ public class ConnectionHandler implements Runnable {
             switch (message.getType()) {
                 case REQUEST:
                     peerNode.addMessageRequest(sender, content);
-                    System.out.println(AnsiColors.ANSI_YELLOW + "\n[SYSTEM] You have a new message request from '" + sender + "'. Type 'inbox' to view." + AnsiColors.ANSI_RESET);
-                    System.out.print(AnsiColors.ANSI_CYAN + "\n> " + AnsiColors.ANSI_RESET);
                     break;
                 case ACCEPT_REQUEST:
-                    peerNode.startChatSession(sender);
-                    System.out.println(AnsiColors.ANSI_YELLOW + "\n[SYSTEM] '" + sender + "' accepted your chat request. You are now in a chat." + AnsiColors.ANSI_RESET);
-                    System.out.println("--- Chat with " + sender + " ---");
+                    peerNode.startChatSession(sender, content);
                     break;
                 case CHAT:
+                    // If we are in a chat with them, display it.
+                    // Otherwise, treat it as a new request.
                     if (peerNode.isInChatWith(sender)) {
-                        System.out.println(AnsiColors.ANSI_GREEN + "\n[" + sender + "]: " + content + AnsiColors.ANSI_RESET);
-                        System.out.print(AnsiColors.ANSI_CYAN + "> " + AnsiColors.ANSI_RESET);
+                        peerNode.displayChatMessage(sender, content);
+                    } else {
+                        peerNode.addMessageRequest(sender, content);
                     }
                     break;
             }
         } catch (Exception e) {
-            System.err.println("Failed to handle message: " + e.getMessage());
+            UI.printError("Failed to handle message: " + e.getMessage());
         }
     }
 }
