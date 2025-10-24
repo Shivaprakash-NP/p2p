@@ -4,7 +4,12 @@ import java.lang.reflect.Type;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.InterfaceAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
+import java.net.UnknownHostException;
 import java.security.PublicKey;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -12,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import com.shiva.p2pchat.crypto.CryptoUtils;
-import com.shiva.p2pchat.ui.AnsiColors;
+import com.shiva.p2pchat.ui.UI;
 
 public class PeerDiscovery implements Runnable {
 
@@ -47,77 +52,130 @@ public class PeerDiscovery implements Runnable {
 
     @Override
     public void run() {
-        try (DatagramSocket socket = new DatagramSocket(discoveryPort)) {
-            socket.setBroadcast(true);
+        // We now use two separate sockets: one for listening, one for broadcasting
+        Thread listenerThread = new Thread(this::listenForPeers);
+        Thread broadcastThread = new Thread(this::broadcastPresence);
 
-            Thread broadcastThread = new Thread(() -> broadcastPresence(socket));
-            broadcastThread.setDaemon(true);
-            broadcastThread.start();
+        listenerThread.setDaemon(true);
+        broadcastThread.setDaemon(true);
 
-            listenForPeers(socket);
-
-        } catch (Exception e) {
-            System.err.println("Peer Discovery failed: " + e.getMessage());
-        }
+        listenerThread.start();
+        broadcastThread.start();
     }
 
-    private void broadcastPresence(DatagramSocket socket) {
-        Map<String, String> broadcastData = new HashMap<>();
-        broadcastData.put("username", username);
-        broadcastData.put("port", String.valueOf(tcpPort));
-        broadcastData.put("publicKey", publicKeyStr);
-        String message = gson.toJson(broadcastData);
-        byte[] sendData = message.getBytes();
-
-        while (running) {
-            try {
-                DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, InetAddress.getByName("255.255.255.255"), discoveryPort);
-                socket.send(sendPacket);
-                Thread.sleep(5000);
-            } catch (Exception e) {
-                // Ignore
+    /**
+     * Tries to find the correct broadcast address for the local network.
+     * Falls back to 255.255.255.255 if one isn't found.
+     */
+    private InetAddress findBroadcastAddress() throws SocketException {
+        Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+        while (interfaces.hasMoreElements()) {
+            NetworkInterface networkInterface = interfaces.nextElement();
+            if (networkInterface.isLoopback() || !networkInterface.isUp()) {
+                continue; // Skip loopback and down interfaces
             }
-        }
-    }
 
-    private void listenForPeers(DatagramSocket socket) {
-        byte[] recvBuf = new byte[2048]; // Increased buffer for public key
-        while (running) {
-            try {
-                DatagramPacket receivePacket = new DatagramPacket(recvBuf, recvBuf.length);
-                socket.receive(receivePacket);
-
-                String jsonMessage = new String(receivePacket.getData(), 0, receivePacket.getLength());
-                Type type = new TypeToken<Map<String, String>>() {}.getType();
-                Map<String, String> receivedData = gson.fromJson(jsonMessage, type);
-
-                String peerUsername = receivedData.get("username");
-                if (peerUsername != null && !peerUsername.equals(username)) {
-                    int peerPort = Integer.parseInt(receivedData.get("port"));
-                    String peerIp = receivePacket.getAddress().getHostAddress();
-                    PublicKey peerPublicKey = CryptoUtils.stringToPublicKey(receivedData.get("publicKey"));
-
-                    if (!onlinePeers.containsKey(peerUsername)) {
-                        System.out.println(AnsiColors.ANSI_YELLOW + "\n[SYSTEM] Found user '" + peerUsername + "'" + AnsiColors.ANSI_RESET);
-                        System.out.print(AnsiColors.ANSI_CYAN + "\n> " + AnsiColors.ANSI_RESET);
-                    }
-                    onlinePeers.put(peerUsername, new DiscoveredPeer(peerIp, peerPort, peerPublicKey));
+            for (InterfaceAddress interfaceAddress : networkInterface.getInterfaceAddresses()) {
+                InetAddress broadcast = interfaceAddress.getBroadcast();
+                if (broadcast != null) {
+                    return broadcast; // Found a valid broadcast address
                 }
-            } catch (Exception e) {
-                // Ignore malformed packets
             }
+        }
+        // Fallback to global broadcast
+        try {
+            return InetAddress.getByName("255.255.255.255");
+        } catch (UnknownHostException e) {
+            return null; // Should never happen
+        }
+    }
+
+    /**
+     * This thread handles broadcasting our presence to the network.
+     */
+    private void broadcastPresence() {
+        try (DatagramSocket broadcastSocket = new DatagramSocket()) {
+            broadcastSocket.setBroadcast(true);
+
+            InetAddress broadcastAddress = findBroadcastAddress();
+            if (broadcastAddress == null) {
+                UI.printError("Could not find broadcast address. Discovery may fail.");
+                return;
+            }
+            UI.printSystem("Broadcasting to: " + broadcastAddress.getHostAddress());
+
+
+            Map<String, String> broadcastData = new HashMap<>();
+            broadcastData.put("username", username);
+            broadcastData.put("port", String.valueOf(tcpPort));
+            broadcastData.put("publicKey", publicKeyStr);
+            String message = gson.toJson(broadcastData);
+            byte[] sendData = message.getBytes();
+
+            while (running) {
+                try {
+                    DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, broadcastAddress, discoveryPort);
+                    broadcastSocket.send(sendPacket);
+                    Thread.sleep(5000); // Broadcast every 5 seconds
+                } catch (Exception e) {
+                    // Ignore transient send errors
+                }
+            }
+        } catch (Exception e) {
+            UI.printError("Broadcast service failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * This thread handles listening for broadcasts from other peers.
+     */
+    private void listenForPeers() {
+        try (DatagramSocket listenerSocket = new DatagramSocket(discoveryPort)) {
+            byte[] recvBuf = new byte[2048]; // Increased buffer for public key
+
+            while (running) {
+                try {
+                    DatagramPacket receivePacket = new DatagramPacket(recvBuf, recvBuf.length);
+                    listenerSocket.receive(receivePacket);
+
+                    String jsonMessage = new String(receivePacket.getData(), 0, receivePacket.getLength());
+                    Type type = new TypeToken<Map<String, String>>() {}.getType();
+                    Map<String, String> receivedData = gson.fromJson(jsonMessage, type);
+
+                    String peerUsername = receivedData.get("username");
+                    if (peerUsername != null && !peerUsername.equals(username)) {
+                        int peerPort = Integer.parseInt(receivedData.get("port"));
+                        String peerIp = receivePacket.getAddress().getHostAddress();
+                        PublicKey peerPublicKey = CryptoUtils.stringToPublicKey(receivedData.get("publicKey"));
+
+                        if (!onlinePeers.containsKey(peerUsername)) {
+                            // This is a UI-sensitive operation, but a simple print is okay
+                            System.out.println(UI.YELLOW + "\n[SYSTEM] " + peerUsername + " joined the network." + UI.RESET);
+                        }
+                        onlinePeers.put(peerUsername, new DiscoveredPeer(peerIp, peerPort, peerPublicKey));
+                    }
+                } catch (Exception e) {
+                    // Ignore malformed packets
+                }
+            }
+        } catch (Exception e) {
+            UI.printError("Discovery listener failed: " + e.getMessage());
         }
     }
 
     public Map<String, DiscoveredPeer> getOnlinePeers() {
+        // Simple timeout logic: remove peers not seen in 15 seconds
+        long now = System.currentTimeMillis();
+        onlinePeers.entrySet().removeIf(entry -> (now - entry.getValue().lastSeen) > 15000);
         return new ConcurrentHashMap<>(onlinePeers);
     }
 
     public DiscoveredPeer getPeer(String username) {
-        return onlinePeers.get(username);
+        return getOnlinePeers().get(username);
     }
 
     public void stop() {
         this.running = false;
     }
 }
+

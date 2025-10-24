@@ -1,3 +1,4 @@
+com/shiva/p2pchat/core/PeerNode$AppState.class
 com/shiva/p2pchat/Main.class
 com/shiva/p2pchat/crypto/KeyManager.class
 com/shiva/p2pchat/discovery/PeerDiscovery$1.class
@@ -5,6 +6,7 @@ com/shiva/p2pchat/model/Contact.class
 com/shiva/p2pchat/discovery/PeerDiscovery.class
 com/shiva/p2pchat/crypto/CryptoUtils.class
 com/shiva/p2pchat/model/Message$MessageType.class
+com/shiva/p2pchat/ui/UI.class
 com/shiva/p2pchat/ui/AnsiColors.class
 com/shiva/p2pchat/core/ConnectionHandler$1.class
 com/shiva/p2pchat/core/PeerNode.class
