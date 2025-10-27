@@ -19,7 +19,6 @@ import com.shiva.p2pchat.ui.UI;
 
 public class PeerNode {
 
-    // --- State Management ---
     private enum AppState {
         MAIN_MENU,
         IN_CHAT,
@@ -27,9 +26,8 @@ public class PeerNode {
     }
     private volatile AppState currentState = AppState.MAIN_MENU;
     private volatile String currentChatPartner = null;
-    private final Object printLock = new Object(); // To synchronize console output
+    private final Object printLock = new Object(); 
 
-    // --- Core Components ---
     private final String username;
     private final int tcpPort;
     private final KeyManager keyManager;
@@ -37,7 +35,6 @@ public class PeerNode {
     private final ExecutorService executorService = Executors.newCachedThreadPool();
     private volatile boolean running = true;
 
-    // --- Data Stores ---
     private final Map<String, List<String>> messageRequests = new ConcurrentHashMap<>();
 
     public PeerNode(String username, int tcpPort, int discoveryPort, KeyManager keyManager) {
@@ -58,7 +55,7 @@ public class PeerNode {
     public void start() {
         executorService.submit(peerDiscovery);
         startServerListener();
-        handleUserInput(); // This will block and run the main UI loop
+        handleUserInput(); 
     }
 
     private void startServerListener() {
@@ -74,12 +71,9 @@ public class PeerNode {
         });
     }
 
-    // --- MAIN UI STATE MACHINE ---
-
     private void handleUserInput() {
         Scanner scanner = new Scanner(System.in);
         while (running) {
-            // The state determines which prompt and logic to use
             switch (currentState) {
                 case MAIN_MENU:
                     handleMainMenuInput(scanner);
@@ -94,10 +88,6 @@ public class PeerNode {
         }
     }
 
-    /**
-     * Logic for the MAIN_MENU state.
-     * Handles 'online', 'requests', 'chat', and 'exit'.
-     */
     private void handleMainMenuInput(Scanner scanner) {
         System.out.print(UI.MAIN_PROMPT);
         String line = scanner.nextLine();
@@ -111,7 +101,7 @@ public class PeerNode {
                     break;
                 case "requests":
                     listRequests();
-                    currentState = AppState.INBOX_VIEW; // Change state
+                    currentState = AppState.INBOX_VIEW; 
                     break;
                 case "chat":
                     if (parts.length == 3) {
@@ -129,10 +119,6 @@ public class PeerNode {
         }
     }
 
-    /**
-     * Logic for the INBOX_VIEW state.
-     * Handles 'accept', 'read', and 'back'.
-     */
     private void handleInboxInput(Scanner scanner) {
         System.out.print(UI.INBOX_PROMPT);
         String line = scanner.nextLine();
@@ -160,10 +146,6 @@ public class PeerNode {
         }
     }
 
-    /**
-     * Logic for the IN_CHAT state.
-     * Handles sending messages and the 'quit' command.
-     */
     private void handleChatInput(Scanner scanner) {
         System.out.print(UI.CHAT_PROMPT);
         String messageText = scanner.nextLine();
@@ -179,7 +161,6 @@ public class PeerNode {
         }
     }
 
-    // --- COMMAND ACTIONS ---
 
     private void listPeers() {
         UI.printHeader("Online Users");
@@ -222,14 +203,12 @@ public class PeerNode {
         
         List<String> messages = messageRequests.remove(user);
         currentChatPartner = user;
-        currentState = AppState.IN_CHAT; // Change state to IN_CHAT
+        currentState = AppState.IN_CHAT; 
 
-        // Send an ACCEPT_REQUEST message so they also enter the chat state
         sendMessage(user, "I've accepted your chat request. Let's talk!", Message.MessageType.ACCEPT_REQUEST);
         
         UI.printHeader("Chat with " + user);
         UI.printSystem("Type 'quit' to exit the chat.\n");
-        // Print the message history that started this chat
         for (String msg : messages) {
             UI.printChat(user, msg);
         }
@@ -248,9 +227,6 @@ public class PeerNode {
         sendMessage(targetUsername, message, Message.MessageType.CHAT);
     }
 
-    /**
-     * The core sending logic. Connects to the peer and sends a Message object.
-     */
     private void sendMessage(String targetUsername, String message, Message.MessageType type) {
         PeerDiscovery.DiscoveredPeer peer = peerDiscovery.getPeer(targetUsername);
         if (peer == null) {
@@ -279,12 +255,6 @@ public class PeerNode {
         System.exit(0);
     }
 
-    // --- ASYNCHRONOUS (NETWORK-THREAD) METHODS ---
-
-    /**
-     * Called by ConnectionHandler when a new request arrives.
-     * Synchronized to prevent conflicts with the UI thread.
-     */
     public void addMessageRequest(String fromUser, String message) {
         synchronized (printLock) {
             messageRequests.computeIfAbsent(fromUser, k -> new ArrayList<>()).add(message);
@@ -295,10 +265,6 @@ public class PeerNode {
         }
     }
 
-    /**
-     * Called by ConnectionHandler when a chat partner accepts our request.
-     * Forces the user into the chat state.
-     */
     public void startChatSession(String partner, String initialMessage) {
         synchronized (printLock) {
             currentChatPartner = partner;
@@ -306,13 +272,11 @@ public class PeerNode {
             UI.printHeader("Chat with " + partner);
             UI.printSystem("Type 'quit' to exit the chat.\n");
             UI.printChat(partner, initialMessage);
-            System.out.print(UI.CHAT_PROMPT); // Print first chat prompt
+            System.out.print(UI.CHAT_PROMPT); 
         }
     }
 
-    /**
-     * Called by ConnectionHandler when a chat message arrives.
-     */
+
     public void displayChatMessage(String fromUser, String message) {
         synchronized (printLock) {
             UI.printChat(fromUser, message);

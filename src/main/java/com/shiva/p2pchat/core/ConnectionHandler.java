@@ -1,12 +1,12 @@
 package com.shiva.p2pchat.core;
 
-import com.shiva.p2pchat.crypto.CryptoUtils;
-import com.shiva.p2pchat.model.Message;
-import com.shiva.p2pchat.ui.UI;
-
 import java.io.ObjectInputStream;
 import java.net.Socket;
 import java.security.PrivateKey;
+
+import com.shiva.p2pchat.crypto.CryptoUtils;
+import com.shiva.p2pchat.model.Message;
+import com.shiva.p2pchat.ui.UI;
 
 public class ConnectionHandler implements Runnable {
 
@@ -28,7 +28,6 @@ public class ConnectionHandler implements Runnable {
                 handleMessage(message);
             }
         } catch (Exception e) {
-            // Connection closed or error
         }
     }
 
@@ -45,8 +44,6 @@ public class ConnectionHandler implements Runnable {
                     peerNode.startChatSession(sender, content);
                     break;
                 case CHAT:
-                    // If we are in a chat with them, display it.
-                    // Otherwise, treat it as a new request.
                     if (peerNode.isInChatWith(sender)) {
                         peerNode.displayChatMessage(sender, content);
                     } else {

@@ -6,8 +6,8 @@ public class Contact {
     private final String username;
     private final String ipAddress;
     private final int port;
-    private final transient PublicKey publicKey; // 'transient' so Gson ignores it
-    private final String publicKeyString; // Store the key as a Base64 string for JSON
+    private final transient PublicKey publicKey; 
+    private final String publicKeyString; 
 
     public Contact(String username, String ipAddress, int port, PublicKey publicKey, String publicKeyString) {
         this.username = username;

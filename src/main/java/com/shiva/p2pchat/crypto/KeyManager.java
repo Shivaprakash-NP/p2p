@@ -19,8 +19,6 @@ public class KeyManager {
     public void loadOrCreateKeys() throws Exception {
         Files.createDirectories(PUBLIC_KEY_PATH.getParent());
         
-        // --- MODIFIED LINE ---
-        // Check if files exist AND have content before trying to read them
         if (Files.exists(PUBLIC_KEY_PATH) && Files.size(PUBLIC_KEY_PATH) > 0 && 
             Files.exists(PRIVATE_KEY_PATH) && Files.size(PRIVATE_KEY_PATH) > 0) {
             

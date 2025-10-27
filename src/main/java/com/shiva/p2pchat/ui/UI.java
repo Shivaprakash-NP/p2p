@@ -38,7 +38,6 @@ public class UI {
     }
     
     public static void printNotification(String message) {
-        // This combination clears the current line, prints the message, and re-draws the prompt
         System.out.print("\r" + YELLOW + "[!] " + message + RESET + "\n" + MAIN_PROMPT);
     }
 }

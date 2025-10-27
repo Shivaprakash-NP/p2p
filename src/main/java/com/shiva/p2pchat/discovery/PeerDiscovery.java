@@ -52,7 +52,6 @@ public class PeerDiscovery implements Runnable {
 
     @Override
     public void run() {
-        // We now use two separate sockets: one for listening, one for broadcasting
         Thread listenerThread = new Thread(this::listenForPeers);
         Thread broadcastThread = new Thread(this::broadcastPresence);
 
@@ -63,36 +62,29 @@ public class PeerDiscovery implements Runnable {
         broadcastThread.start();
     }
 
-    /**
-     * Tries to find the correct broadcast address for the local network.
-     * Falls back to 255.255.255.255 if one isn't found.
-     */
     private InetAddress findBroadcastAddress() throws SocketException {
         Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
         while (interfaces.hasMoreElements()) {
             NetworkInterface networkInterface = interfaces.nextElement();
             if (networkInterface.isLoopback() || !networkInterface.isUp()) {
-                continue; // Skip loopback and down interfaces
+                continue; 
             }
 
             for (InterfaceAddress interfaceAddress : networkInterface.getInterfaceAddresses()) {
                 InetAddress broadcast = interfaceAddress.getBroadcast();
                 if (broadcast != null) {
-                    return broadcast; // Found a valid broadcast address
+                    return broadcast; 
                 }
             }
         }
-        // Fallback to global broadcast
         try {
             return InetAddress.getByName("255.255.255.255");
         } catch (UnknownHostException e) {
-            return null; // Should never happen
+            return null; 
         }
     }
 
-    /**
-     * This thread handles broadcasting our presence to the network.
-     */
+
     private void broadcastPresence() {
         try (DatagramSocket broadcastSocket = new DatagramSocket()) {
             broadcastSocket.setBroadcast(true);
@@ -118,7 +110,6 @@ public class PeerDiscovery implements Runnable {
                     broadcastSocket.send(sendPacket);
                     Thread.sleep(5000); // Broadcast every 5 seconds
                 } catch (Exception e) {
-                    // Ignore transient send errors
                 }
             }
         } catch (Exception e) {
@@ -126,12 +117,9 @@ public class PeerDiscovery implements Runnable {
         }
     }
 
-    /**
-     * This thread handles listening for broadcasts from other peers.
-     */
     private void listenForPeers() {
         try (DatagramSocket listenerSocket = new DatagramSocket(discoveryPort)) {
-            byte[] recvBuf = new byte[2048]; // Increased buffer for public key
+            byte[] recvBuf = new byte[2048]; 
 
             while (running) {
                 try {
@@ -149,13 +137,11 @@ public class PeerDiscovery implements Runnable {
                         PublicKey peerPublicKey = CryptoUtils.stringToPublicKey(receivedData.get("publicKey"));
 
                         if (!onlinePeers.containsKey(peerUsername)) {
-                            // This is a UI-sensitive operation, but a simple print is okay
                             System.out.println(UI.YELLOW + "\n[SYSTEM] " + peerUsername + " joined the network." + UI.RESET);
                         }
                         onlinePeers.put(peerUsername, new DiscoveredPeer(peerIp, peerPort, peerPublicKey));
                     }
                 } catch (Exception e) {
-                    // Ignore malformed packets
                 }
             }
         } catch (Exception e) {
@@ -164,7 +150,6 @@ public class PeerDiscovery implements Runnable {
     }
 
     public Map<String, DiscoveredPeer> getOnlinePeers() {
-        // Simple timeout logic: remove peers not seen in 15 seconds
         long now = System.currentTimeMillis();
         onlinePeers.entrySet().removeIf(entry -> (now - entry.getValue().lastSeen) > 15000);
         return new ConcurrentHashMap<>(onlinePeers);
