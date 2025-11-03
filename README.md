@@ -17,7 +17,7 @@ Ports used (make sure not blocked):
 ## 1) Clone & build
 ```bash
 # clone (if not already)
-git clone <your-repository-url>
+git clone https://github.com/Shivaprakash-NP/p2p
 cd P2P-Secure-Messenger
 
 # clean & compile
@@ -28,4 +28,4 @@ mvn exec:java -Dexec.mainClass="com.shiva.p2pchat.Main"
 
 #run-terminal 2
 mvn exec:java -Dexec.mainClass="com.shiva.p2pchat.Main"
-
+```
