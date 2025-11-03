@@ -46,12 +46,11 @@ public class PeerNode {
 
     public KeyManager getKeyManager() { return keyManager; }
 
-    /**
-     * Starts the main application loops:
-     * 1. Peer Discovery (UDP)
-     * 2. Server Listener (TCP)
-     * 3. User Input (Console)
-     */
+    /* Starts the main application loops:
+     1. Peer Discovery (UDP)
+     2. Server Listener (TCP)
+     3. User Input */
+
     public void start() {
         executorService.submit(peerDiscovery);
         startServerListener();
@@ -258,7 +257,6 @@ public class PeerNode {
     public void addMessageRequest(String fromUser, String message) {
         synchronized (printLock) {
             messageRequests.computeIfAbsent(fromUser, k -> new ArrayList<>()).add(message);
-            // Only print notification if user is in main menu
             if (currentState == AppState.MAIN_MENU) {
                 UI.printNotification("New request from '" + fromUser + "'. Type 'requests' to view.");
             }
@@ -275,7 +273,6 @@ public class PeerNode {
             System.out.print(UI.CHAT_PROMPT); 
         }
     }
-
 
     public void displayChatMessage(String fromUser, String message) {
         synchronized (printLock) {
